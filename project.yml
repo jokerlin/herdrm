@@ -21,6 +21,12 @@ targets:
       - Sources/HerdrM
       - path: Resources
         buildPhase: resources
+        excludes:
+          - TerminalThemes
+      # Folder reference: lands in the bundle as Resources/TerminalThemes/.
+      - path: Resources/TerminalThemes
+        buildPhase: resources
+        type: folder
     dependencies:
       - package: HerdrKit
       - package: SwiftTerm

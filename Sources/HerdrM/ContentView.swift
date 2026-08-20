@@ -103,14 +103,28 @@ struct DetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             titlebar
-                .background(Theme.contentBackground)
+                .background(chromeBackground)
                 .zIndex(1)
             Rectangle().fill(Theme.hairline).frame(height: 1)
             terminal
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.contentBackground.ignoresSafeArea())
+        .background(chromeBackground.ignoresSafeArea())
+        // With a theme active, the titlebar text sits on the theme's background,
+        // so the adaptive Theme colors must resolve for its brightness.
+        .transformEnvironment(\.colorScheme) { scheme in
+            if let spec = TerminalThemeCatalog.spec(named: terminalTheme) {
+                scheme = spec.background.isDark ? .dark : .light
+            }
+        }
+    }
+
+    /// Titlebar and pane chrome: the theme's background when one is active,
+    /// the neutral system surface otherwise.
+    private var chromeBackground: Color {
+        TerminalThemeCatalog.spec(named: terminalTheme)
+            .map { Color(nsColor: $0.background.nsColor) } ?? Theme.contentBackground
     }
 
     // MARK: - Titlebar strip (28pt, traditional)
@@ -199,8 +213,18 @@ struct DetailView: View {
 
     @AppStorage(TerminalDefaults.fontNameKey) private var terminalFontName = ""
     @AppStorage(TerminalDefaults.fontSizeKey) private var terminalFontSize = TerminalDefaults.defaultFontSize
+    @AppStorage(TerminalDefaults.themeKey) private var terminalTheme = ""
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
     @Environment(\.colorScheme) private var colorScheme
+
+    /// The active theme's background, so the padding around the terminal matches
+    /// it instead of framing it in the built-in color.
+    private var terminalPaneBackground: Color {
+        guard let spec = TerminalThemeCatalog.spec(named: terminalTheme) else {
+            return Theme.terminalBackground
+        }
+        return Color(nsColor: spec.background.nsColor)
+    }
 
     @ViewBuilder
     private var terminal: some View {
@@ -212,13 +236,14 @@ struct DetailView: View {
                 fontName: terminalFontName,
                 fontSize: terminalFontSize,
                 dark: colorScheme == .dark,
+                theme: terminalTheme,
                 mouseReporting: terminalMouseReporting
             )
-                .id("attach-\(entry.id)-\(colorScheme)")
+                .id("attach-\(entry.id)-\(colorScheme)-\(terminalTheme)")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.terminalBackground)
+                .background(terminalPaneBackground)
         } else {
             VStack(spacing: 10) {
                 Image(systemName: "terminal")
@@ -240,7 +265,7 @@ struct DetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.terminalBackground)
+            .background(terminalPaneBackground)
         }
     }
 

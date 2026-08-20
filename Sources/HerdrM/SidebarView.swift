@@ -21,6 +21,12 @@ struct SidebarView: View {
     @ObservedObject var model: AppModel
     @Binding var collapsed: Bool
     @State private var deviceButtonHovered = false
+    @AppStorage(TerminalDefaults.themeKey) private var terminalTheme = ""
+    @AppStorage(TerminalDefaults.matchSidebarKey) private var matchesTerminalTheme = true
+
+    private var themeSpec: TerminalThemeSpec? {
+        matchesTerminalTheme ? TerminalThemeCatalog.spec(named: terminalTheme) : nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -112,7 +118,26 @@ struct SidebarView: View {
             footer
         }
         .frame(width: 260)
-        .background(VisualEffectView(material: .sidebar).ignoresSafeArea())
+        .background(sidebarBackground)
+        // A themed sidebar renders its text against the theme's background, so
+        // the adaptive Theme colors must resolve for the theme's brightness,
+        // not the system appearance.
+        .transformEnvironment(\.colorScheme) { scheme in
+            if let spec = themeSpec {
+                scheme = spec.background.isDark ? .dark : .light
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarBackground: some View {
+        if matchesTerminalTheme {
+            let color = themeSpec.map { Color(nsColor: $0.background.nsColor) }
+                ?? Theme.terminalBackground
+            color.ignoresSafeArea()
+        } else {
+            VisualEffectView(material: .sidebar).ignoresSafeArea()
+        }
     }
 
     private var emptyAgentsHint: String {

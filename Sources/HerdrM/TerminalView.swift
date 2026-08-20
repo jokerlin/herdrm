@@ -6,6 +6,8 @@ import SwiftUI
 enum TerminalDefaults {
     static let fontNameKey = "terminal.fontName"   // "" = system monospaced
     static let fontSizeKey = "terminal.fontSize"
+    static let themeKey = "terminal.theme"   // theme name, "" = built-in colors
+    static let matchSidebarKey = "sidebar.matchTerminalTheme"
     static let defaultFontSize: Double = 12.5
     static let darkBackground = NSColor(
         srgbRed: 0x10 / 255,
@@ -19,7 +21,13 @@ enum TerminalDefaults {
         blue: 0xD6 / 255,
         alpha: 1
     )
-    static let lightBackground = NSColor.white
+    // Flexoki Light paper (matches the user-facing ghostty/cmux default here).
+    static let lightBackground = NSColor(
+        srgbRed: 0xFF / 255,
+        green: 0xFC / 255,
+        blue: 0xF0 / 255,
+        alpha: 1
+    )
     static let lightForeground = NSColor(
         srgbRed: 0x3A / 255,
         green: 0x3A / 255,
@@ -81,7 +89,7 @@ enum TerminalDefaults {
 /// this inert when a TUI negotiates the kitty keyboard protocol.
 final class LineBreakTerminalView: LocalProcessTerminalView {
     var usesLightColors = false
-    var appliedDarkAppearance: Bool?
+    var appliedAppearanceKey: String?
     private var lightColorAdapter = LightTerminalANSIAdapter()
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
@@ -218,6 +226,8 @@ struct AttachTerminalView: NSViewRepresentable {
     var fontSize: Double = TerminalDefaults.defaultFontSize
     /// From SwiftUI's environment so theme switches re-render immediately.
     var dark: Bool = false
+    /// Theme name from settings; "" falls back to the built-in colors.
+    var theme: String = ""
     /// When false, mouse drags always select text locally even if the TUI
     /// requested mouse reporting (Shift+drag bypasses it either way).
     var mouseReporting: Bool = true
@@ -255,21 +265,45 @@ struct AttachTerminalView: NSViewRepresentable {
         nsView.terminate()
     }
 
+    @MainActor
     private func configureAppearance(_ view: LocalProcessTerminalView) {
         let font = TerminalDefaults.font(name: fontName, size: fontSize)
         if view.font != font {
             view.font = font
         }
         view.allowMouseReporting = mouseReporting
+        let appearanceKey = "\(dark)|\(theme)"
         guard let view = view as? LineBreakTerminalView,
-              view.appliedDarkAppearance != dark
+              view.appliedAppearanceKey != appearanceKey
         else { return }
-        view.appliedDarkAppearance = dark
+        view.appliedAppearanceKey = appearanceKey
+        if let spec = TerminalThemeCatalog.spec(named: theme) {
+            apply(spec, to: view)
+        } else {
+            applyBuiltinColors(to: view)
+        }
+        view.needsDisplay = true
+    }
+
+    private func apply(_ spec: TerminalThemeSpec, to view: LineBreakTerminalView) {
+        // Theme palettes are curated for their own background — the light-mode
+        // ANSI contrast adapter would fight them.
+        view.usesLightColors = false
+        view.nativeBackgroundColor = spec.background.nsColor
+        view.nativeForegroundColor = spec.foreground.nsColor
+        view.installColors(spec.terminalPalette)
+        view.caretColor = (spec.cursorColor ?? spec.foreground).nsColor
+        view.caretTextColor = spec.cursorText?.nsColor
+        if let selection = spec.selectionBackground {
+            view.selectedTextBackgroundColor = selection.nsColor
+        }
+    }
+
+    private func applyBuiltinColors(to view: LineBreakTerminalView) {
         view.usesLightColors = !dark
         view.nativeBackgroundColor = dark ? TerminalDefaults.darkBackground : TerminalDefaults.lightBackground
         view.nativeForegroundColor = dark ? TerminalDefaults.darkForeground : TerminalDefaults.lightForeground
         view.installColors(dark ? TerminalDefaults.darkPalette : TerminalDefaults.lightPalette)
-        view.needsDisplay = true
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {

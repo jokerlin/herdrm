@@ -7,6 +7,18 @@ the Sparkle update description — a release without a section here fails CI.
 
 ## [Unreleased]
 
+### Added
+- Terminal color themes: Settings → Terminal gains a Theme picker with the
+  full ghostty theme catalog (463 themes, bundled; themes in
+  `~/.config/ghostty/themes` are offered too and win by name). A theme applies
+  the complete scheme — background, foreground, ANSI 16, cursor, selection —
+  in both light and dark mode; "Default" keeps the built-in adaptive colors.
+- Match sidebar to theme (on by default): the sidebar and the titlebar are
+  painted with the active theme's background instead of the system material,
+  so the whole window reads as one surface, cmux-style.
+- The built-in light terminal background is now Flexoki-paper `#FFFCF0`
+  instead of stark white.
+
 ## [0.3.6] - 2026-08-20
 
 ### Fixed

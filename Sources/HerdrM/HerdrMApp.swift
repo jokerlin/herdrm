@@ -49,6 +49,7 @@ struct HerdrMApp: App {
             Self.runSSHAskPass()
         }
         SSHCredentialStore.purgeAuthorizations()
+        Self.migrateThemeSettings()
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: nil,
@@ -88,6 +89,19 @@ struct HerdrMApp: App {
         Settings {
             SettingsView()
         }
+    }
+
+    /// One-shot migration: the light/dark theme pair collapsed into terminal.theme.
+    private static func migrateThemeSettings() {
+        let defaults = UserDefaults.standard
+        if defaults.string(forKey: TerminalDefaults.themeKey) == nil,
+           let legacy = ["terminal.lightTheme", "terminal.darkTheme"]
+               .compactMap({ defaults.string(forKey: $0) })
+               .first(where: { !$0.isEmpty }) {
+            defaults.set(legacy, forKey: TerminalDefaults.themeKey)
+        }
+        defaults.removeObject(forKey: "terminal.lightTheme")
+        defaults.removeObject(forKey: "terminal.darkTheme")
     }
 
     static func applyTheme(_ preference: String) {
@@ -130,9 +144,16 @@ struct SettingsView: View {
 struct TerminalSettingsView: View {
     @AppStorage(TerminalDefaults.fontNameKey) private var fontName = ""
     @AppStorage(TerminalDefaults.fontSizeKey) private var fontSize = TerminalDefaults.defaultFontSize
+    @AppStorage(TerminalDefaults.themeKey) private var theme = ""
+    @AppStorage(TerminalDefaults.matchSidebarKey) private var matchSidebar = true
     @AppStorage("terminal.mouseReporting") private var mouseReporting = true
 
     private let families = TerminalDefaults.monospacedFamilies()
+    private let themeNames = TerminalThemeCatalog.availableNames()
+
+    private var previewSpec: TerminalThemeSpec? {
+        TerminalThemeCatalog.spec(named: theme)
+    }
 
     var body: some View {
         Form {
@@ -156,6 +177,23 @@ struct TerminalSettingsView: View {
                     .labelsHidden()
             }
 
+            Picker("Theme", selection: $theme) {
+                Text("Default").tag("")
+                Divider()
+                ForEach(themeNames, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+
+            Toggle(isOn: $matchSidebar) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Match sidebar to theme")
+                    Text("Paints the sidebar with the terminal theme's background instead of the system material.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Toggle(isOn: $mouseReporting) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Mouse reporting")
@@ -168,6 +206,8 @@ struct TerminalSettingsView: View {
             Button("Reset to Defaults") {
                 fontName = ""
                 fontSize = TerminalDefaults.defaultFontSize
+                theme = ""
+                matchSidebar = true
                 mouseReporting = true
             }
 
@@ -177,12 +217,21 @@ struct TerminalSettingsView: View {
                     .foregroundStyle(.secondary)
                 Text("❯ herdr agent attach w1:p1 — 中文 ABC 0123")
                     .font(Font(TerminalDefaults.font(name: fontName, size: fontSize)))
+                    .foregroundStyle(previewForeground)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.terminalBackground, in: RoundedRectangle(cornerRadius: 6))
+                    .background(previewBackground, in: RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(20)
+    }
+
+    private var previewBackground: Color {
+        previewSpec.map { Color(nsColor: $0.background.nsColor) } ?? Theme.terminalBackground
+    }
+
+    private var previewForeground: Color {
+        previewSpec.map { Color(nsColor: $0.foreground.nsColor) } ?? Theme.text
     }
 }
 
@@ -197,7 +246,7 @@ struct AppearanceSettingsView: View {
                 Text("Dark").tag("dark")
             }
             .pickerStyle(.segmented)
-            Text("The terminal follows the app theme.")
+            Text("The default terminal colors follow the app theme; a theme picked in the Terminal tab applies in both modes.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
