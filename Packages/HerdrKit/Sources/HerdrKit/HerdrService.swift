@@ -468,16 +468,22 @@ public actor HerdrService {
         _ = try await client().request(method: "pane.close", params: .object(["pane_id": .string(paneID)]))
     }
 
-    /// Splits a pane to the right with a bare shell (no agent) and returns the
-    /// new pane's ids. `terminal_id` is what a bare pane attaches by — the
+    public enum SplitDirection: String, Sendable {
+        case right, down
+    }
+
+    /// Splits a pane with a bare shell (no agent) at an even 50/50 and returns
+    /// the new pane's ids. `terminal_id` is what a bare pane attaches by — the
     /// agent-attach path can't resolve a pane that has no agent.
-    public func splitPaneRight(
+    public func splitPane(
         targetPaneID: String,
+        direction: SplitDirection,
         cwd: String? = nil
     ) async throws -> (paneID: String, terminalID: String) {
         var params: [String: JSONValue] = [
             "target_pane_id": .string(targetPaneID),
-            "direction": .string("right"),
+            "direction": .string(direction.rawValue),
+            "ratio": .number(0.5),
             "focus": .bool(false),
         ]
         if let cwd { params["cwd"] = .string(cwd) }

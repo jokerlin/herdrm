@@ -45,7 +45,7 @@ final class AppModel: ObservableObject {
     @Published var sessions: [UUID: DeviceSessionState] = [:]
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef?
-    @Published var companionShells: [PaneRef: CompanionShell] = [:]
+    @Published var companionShells: [PaneRef: CompanionSet] = [:]
 
     @Published var showAddDevice = false
     @Published var showNewAgent = false
@@ -124,11 +124,20 @@ final class AppModel: ObservableObject {
         var ref: PaneRef { PaneRef(deviceID: device.id, paneID: agent.paneID) }
     }
 
-    /// A bare helper shell split off an agent pane (⌘D), keyed by that pane's
-    /// ref. Bare panes attach by terminal id — they have no agent to resolve.
+    /// A bare helper shell split off an agent pane. Bare panes attach by
+    /// terminal id — they have no agent to resolve.
     struct CompanionShell {
         let paneID: String
         let terminalID: String
+    }
+
+    /// The helper shells beside one agent pane: ⌘D fills `right`, ⇧⌘D fills
+    /// `down` (splitting the right column when it exists, the agent otherwise).
+    struct CompanionSet {
+        var right: CompanionShell?
+        var down: CompanionShell?
+
+        var isEmpty: Bool { right == nil && down == nil }
     }
 
     struct SpaceEntry: Identifiable {
@@ -404,9 +413,13 @@ final class AppModel: ObservableObject {
             // Companion shells collapse when their pane dies (exit, pane close).
             if let panes = snapshot.panes {
                 let live = Set(panes.map(\.paneID))
-                companionShells = companionShells.filter {
-                    $0.key.deviceID != deviceID || live.contains($0.value.paneID)
-                }
+                companionShells = Dictionary(uniqueKeysWithValues: companionShells.compactMap { ref, set in
+                    guard ref.deviceID == deviceID else { return (ref, set) }
+                    var set = set
+                    if let right = set.right, !live.contains(right.paneID) { set.right = nil }
+                    if let down = set.down, !live.contains(down.paneID) { set.down = nil }
+                    return set.isEmpty ? nil : (ref, set)
+                })
             }
             if let selected = selectedPane, selected.deviceID == deviceID,
                !snapshot.agents.contains(where: { $0.paneID == selected.paneID }) {
@@ -573,23 +586,39 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// ⌘D: split a bare helper shell to the right of the selected agent's pane
-    /// (cmux-style), or close it if one is already open.
-    func toggleCompanionShell() {
+    /// ⌘D / ⇧⌘D: split a bare helper shell off the selected agent's pane
+    /// (cmux-style), or close that direction's shell if it's already open.
+    /// A down split stacks under the right shell when one exists, so the two
+    /// helpers share the right column.
+    func toggleCompanionShell(_ direction: HerdrService.SplitDirection = .right) {
         guard let entry = selectedEntry else { return }
         let ref = entry.ref
-        if let shell = companionShells[ref] {
-            companionShells[ref] = nil
+        var set = companionShells[ref] ?? CompanionSet()
+        let open = direction == .right ? set.right : set.down
+        if let shell = open {
+            switch direction {
+            case .right: set.right = nil
+            case .down: set.down = nil
+            }
+            companionShells[ref] = set.isEmpty ? nil : set
             Task { try? await service(for: entry.device).closePane(paneID: shell.paneID) }
             return
         }
+        let target = direction == .down ? (set.right?.paneID ?? entry.agent.paneID) : entry.agent.paneID
         Task {
             do {
-                let shell = try await service(for: entry.device).splitPaneRight(
-                    targetPaneID: entry.agent.paneID,
+                let shell = try await service(for: entry.device).splitPane(
+                    targetPaneID: target,
+                    direction: direction,
                     cwd: entry.agent.cwd
                 )
-                companionShells[ref] = CompanionShell(paneID: shell.paneID, terminalID: shell.terminalID)
+                var set = companionShells[ref] ?? CompanionSet()
+                let companion = CompanionShell(paneID: shell.paneID, terminalID: shell.terminalID)
+                switch direction {
+                case .right: set.right = companion
+                case .down: set.down = companion
+                }
+                companionShells[ref] = set
             } catch {
                 actionError = error.localizedDescription
             }

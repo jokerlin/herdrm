@@ -78,9 +78,12 @@ struct HerdrMApp: App {
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(focusedModel == nil)
                 Divider()
-                // cmux-style helper shell beside the agent; pressing again closes it.
-                Button("Split Terminal") { focusedModel?.toggleCompanionShell() }
+                // cmux-style helper shells beside the agent; pressing again closes them.
+                Button("Split Terminal Right") { focusedModel?.toggleCompanionShell(.right) }
                     .keyboardShortcut("d", modifiers: .command)
+                    .disabled(focusedModel?.selectedEntry == nil)
+                Button("Split Terminal Down") { focusedModel?.toggleCompanionShell(.down) }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(focusedModel?.selectedEntry == nil)
             }
 

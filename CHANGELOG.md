@@ -19,12 +19,15 @@ the Sparkle update description — a release without a section here fails CI.
 - The built-in light terminal background is now Flexoki-paper `#FFFCF0`
   instead of stark white.
 
-- Split Terminal (⌘D): splits a bare helper shell to the right of the agent's
-  terminal, cmux-style, starting in the agent's working directory — for quick
-  `ls`/`cat`-grade side work without starting another agent. Press ⌘D again
-  (or `exit` the shell) to close it. The split is a real herdr `pane.split`,
-  so the herdr TUI shows the same layout; the bare pane attaches via
-  `herdr terminal attach` since it has no agent for the agent-attach path.
+- Split Terminal (⌘D right, ⇧⌘D down): splits a bare helper shell off the
+  agent's terminal, cmux-style, starting in the agent's working directory —
+  for quick `ls`/`cat`-grade side work without starting another agent. Both
+  splits open at an even 50/50 with a draggable divider; ⇧⌘D stacks under the
+  right shell when one is open, so the two helpers share the right column.
+  Press the same shortcut again (or `exit` the shell) to close one. The
+  splits are real herdr `pane.split`s, so the herdr TUI shows the same
+  layout; bare panes attach via `herdr terminal attach` since they have no
+  agent for the agent-attach path.
 
 ### Fixed
 - Removed the gray track down the terminal's right edge: SwiftTerm pins a

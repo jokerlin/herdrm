@@ -231,15 +231,32 @@ struct DetailView: View {
         if let entry = model.selectedEntry {
             let companion = model.companionShells[entry.ref]
             Group {
-                if let companion {
-                    HSplitView {
+                // Companion shells share the right column, cmux-style:
+                // agent | right, agent / down, or agent | (right / down).
+                switch (companion?.right, companion?.down) {
+                case let (right?, down?):
+                    DraggableSplit(axis: .horizontal) {
                         attachView(entry, target: .pane(entry.agent.paneID))
-                            .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
-                        attachView(entry, target: .terminal(companion.terminalID))
-                            .frame(minWidth: 240, maxWidth: .infinity, maxHeight: .infinity)
+                    } second: {
+                        DraggableSplit(axis: .vertical) {
+                            attachView(entry, target: .terminal(right.terminalID))
+                        } second: {
+                            attachView(entry, target: .terminal(down.terminalID))
+                        }
                     }
-                } else {
+                case let (right?, nil):
+                    DraggableSplit(axis: .horizontal) {
+                        attachView(entry, target: .pane(entry.agent.paneID))
+                    } second: {
+                        attachView(entry, target: .terminal(right.terminalID))
+                    }
+                case let (nil, down?):
+                    DraggableSplit(axis: .vertical) {
+                        attachView(entry, target: .pane(entry.agent.paneID))
+                    } second: {
+                        attachView(entry, target: .terminal(down.terminalID))
+                    }
+                case (nil, nil):
                     attachView(entry, target: .pane(entry.agent.paneID))
                 }
             }
