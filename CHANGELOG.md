@@ -19,6 +19,12 @@ the Sparkle update description — a release without a section here fails CI.
 - The built-in light terminal background is now Flexoki-paper `#FFFCF0`
   instead of stark white.
 
+### Fixed
+- Removed the gray track down the terminal's right edge: SwiftTerm pins a
+  permanently disabled `NSScroller` there, useless for herdr's
+  alternate-screen TUI, and its disabled state painted a visible strip on
+  themed backgrounds.
+
 ## [0.3.6] - 2026-08-20
 
 ### Fixed

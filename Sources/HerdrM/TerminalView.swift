@@ -92,6 +92,16 @@ final class LineBreakTerminalView: LocalProcessTerminalView {
     var appliedAppearanceKey: String?
     private var lightColorAdapter = LightTerminalANSIAdapter()
 
+    // herdr's attach TUI lives on the alternate screen, so SwiftTerm's local
+    // scroller stays permanently disabled — all it does is paint a gray track
+    // down the right edge. SwiftTerm doesn't expose it; catch it as it's added.
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let scroller = subview as? NSScroller {
+            scroller.isHidden = true
+        }
+    }
+
     override func dataReceived(slice: ArraySlice<UInt8>) {
         guard usesLightColors else {
             super.dataReceived(slice: slice)
