@@ -229,7 +229,7 @@ final class LineBreakTerminalView: LocalProcessTerminalView {
 /// Embeds a SwiftTerm terminal running `herdr agent attach` (directly or over ssh).
 struct AttachTerminalView: NSViewRepresentable {
     let device: Device
-    let paneID: String
+    let target: HerdrService.AttachTarget
     /// The device's herdr server version, so attach picks a matching CLI binary.
     var serverVersion: String?
     var fontName: String = ""
@@ -250,7 +250,7 @@ struct AttachTerminalView: NSViewRepresentable {
         configureAppearance(view)
 
         let service = HerdrService(device: device)
-        let command = service.attachCommand(paneID: paneID, serverVersion: serverVersion)
+        let command = service.attachCommand(target: target, serverVersion: serverVersion)
         var environment = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         environment.append("LANG=en_US.UTF-8")
         for (key, value) in command.environment {

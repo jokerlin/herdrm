@@ -122,12 +122,12 @@ final class AttachBinarySelectionTests: XCTestCase {
 
     func testAttachCommandsRunTheSelectedBinaryThroughSh() {
         let local = HerdrService(device: Device(name: "L", kind: .local), localServer: nil)
-            .attachCommand(paneID: "w1:p1", serverVersion: "0.8.2")
+            .attachCommand(target: .pane("w1:p1"), serverVersion: "0.8.2")
         XCTAssertEqual(local.executable, "/bin/sh")
         XCTAssertTrue(local.args.last?.contains("exec \"$hb\" agent attach 'w1:p1'") == true)
 
         let remote = HerdrService(device: Device(name: "R", kind: .ssh(target: "u@h")), localServer: nil)
-            .attachCommand(paneID: "w1:p1", serverVersion: "0.8.2")
+            .attachCommand(target: .pane("w1:p1"), serverVersion: "0.8.2")
         XCTAssertEqual(remote.executable, "/usr/bin/ssh")
         // The whole script must run under sh on the far side, not the login shell.
         XCTAssertTrue(remote.args.last?.hasPrefix("exec /bin/sh -c '") == true)

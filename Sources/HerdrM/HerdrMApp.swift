@@ -77,6 +77,11 @@ struct HerdrMApp: App {
                 Button("New Space") { focusedModel?.showNewSpace = true }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(focusedModel == nil)
+                Divider()
+                // cmux-style helper shell beside the agent; pressing again closes it.
+                Button("Split Terminal") { focusedModel?.toggleCompanionShell() }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(focusedModel?.selectedEntry == nil)
             }
 
             CommandGroup(after: .appInfo) {

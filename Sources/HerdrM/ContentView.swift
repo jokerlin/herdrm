@@ -229,17 +229,20 @@ struct DetailView: View {
     @ViewBuilder
     private var terminal: some View {
         if let entry = model.selectedEntry {
-            AttachTerminalView(
-                device: entry.device,
-                paneID: entry.agent.paneID,
-                serverVersion: model.serverVersion(deviceID: entry.device.id),
-                fontName: terminalFontName,
-                fontSize: terminalFontSize,
-                dark: colorScheme == .dark,
-                theme: terminalTheme,
-                mouseReporting: terminalMouseReporting
-            )
-                .id("attach-\(entry.id)-\(colorScheme)-\(terminalTheme)")
+            let companion = model.companionShells[entry.ref]
+            Group {
+                if let companion {
+                    HSplitView {
+                        attachView(entry, target: .pane(entry.agent.paneID))
+                            .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
+                        attachView(entry, target: .terminal(companion.terminalID))
+                            .frame(minWidth: 240, maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    attachView(entry, target: .pane(entry.agent.paneID))
+                }
+            }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -267,6 +270,23 @@ struct DetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(terminalPaneBackground)
         }
+    }
+
+    private func attachView(
+        _ entry: AppModel.AgentEntry,
+        target: HerdrService.AttachTarget
+    ) -> some View {
+        AttachTerminalView(
+            device: entry.device,
+            target: target,
+            serverVersion: model.serverVersion(deviceID: entry.device.id),
+            fontName: terminalFontName,
+            fontSize: terminalFontSize,
+            dark: colorScheme == .dark,
+            theme: terminalTheme,
+            mouseReporting: terminalMouseReporting
+        )
+        .id("attach-\(entry.id)-\(target.key)-\(colorScheme)-\(terminalTheme)")
     }
 
     private var showsStartAgentShortcut: Bool {

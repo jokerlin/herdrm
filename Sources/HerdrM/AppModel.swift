@@ -45,6 +45,7 @@ final class AppModel: ObservableObject {
     @Published var sessions: [UUID: DeviceSessionState] = [:]
     @Published var selectedSpace: SpaceRef?
     @Published var selectedPane: PaneRef?
+    @Published var companionShells: [PaneRef: CompanionShell] = [:]
 
     @Published var showAddDevice = false
     @Published var showNewAgent = false
@@ -121,6 +122,13 @@ final class AppModel: ObservableObject {
 
         var id: String { "\(device.id.uuidString)-\(agent.paneID)" }
         var ref: PaneRef { PaneRef(deviceID: device.id, paneID: agent.paneID) }
+    }
+
+    /// A bare helper shell split off an agent pane (⌘D), keyed by that pane's
+    /// ref. Bare panes attach by terminal id — they have no agent to resolve.
+    struct CompanionShell {
+        let paneID: String
+        let terminalID: String
     }
 
     struct SpaceEntry: Identifiable {
@@ -393,6 +401,13 @@ final class AppModel: ObservableObject {
             sessions[deviceID]?.agents = snapshot.agents
             sessions[deviceID]?.workspaces = snapshot.workspaces
             sessions[deviceID]?.panes = snapshot.panes ?? []
+            // Companion shells collapse when their pane dies (exit, pane close).
+            if let panes = snapshot.panes {
+                let live = Set(panes.map(\.paneID))
+                companionShells = companionShells.filter {
+                    $0.key.deviceID != deviceID || live.contains($0.value.paneID)
+                }
+            }
             if let selected = selectedPane, selected.deviceID == deviceID,
                !snapshot.agents.contains(where: { $0.paneID == selected.paneID }) {
                 selectedPane = nil
@@ -552,6 +567,29 @@ final class AppModel: ObservableObject {
                 await refresh(device.id)
                 selectedSpace = SpaceRef(deviceID: device.id, workspaceID: created.workspaceID)
                 showNewAgent = true
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    /// ⌘D: split a bare helper shell to the right of the selected agent's pane
+    /// (cmux-style), or close it if one is already open.
+    func toggleCompanionShell() {
+        guard let entry = selectedEntry else { return }
+        let ref = entry.ref
+        if let shell = companionShells[ref] {
+            companionShells[ref] = nil
+            Task { try? await service(for: entry.device).closePane(paneID: shell.paneID) }
+            return
+        }
+        Task {
+            do {
+                let shell = try await service(for: entry.device).splitPaneRight(
+                    targetPaneID: entry.agent.paneID,
+                    cwd: entry.agent.cwd
+                )
+                companionShells[ref] = CompanionShell(paneID: shell.paneID, terminalID: shell.terminalID)
             } catch {
                 actionError = error.localizedDescription
             }

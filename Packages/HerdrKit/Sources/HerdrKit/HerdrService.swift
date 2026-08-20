@@ -468,6 +468,26 @@ public actor HerdrService {
         _ = try await client().request(method: "pane.close", params: .object(["pane_id": .string(paneID)]))
     }
 
+    /// Splits a pane to the right with a bare shell (no agent) and returns the
+    /// new pane's ids. `terminal_id` is what a bare pane attaches by — the
+    /// agent-attach path can't resolve a pane that has no agent.
+    public func splitPaneRight(
+        targetPaneID: String,
+        cwd: String? = nil
+    ) async throws -> (paneID: String, terminalID: String) {
+        var params: [String: JSONValue] = [
+            "target_pane_id": .string(targetPaneID),
+            "direction": .string("right"),
+            "focus": .bool(false),
+        ]
+        if let cwd { params["cwd"] = .string(cwd) }
+        let result = try await client().request(method: "pane.split", params: .object(params))
+        guard let paneID = result["pane"]?["pane_id"]?.stringValue,
+              let terminalID = result["pane"]?["terminal_id"]?.stringValue
+        else { throw HerdrError.malformedResponse("pane.split returned no pane ids") }
+        return (paneID, terminalID)
+    }
+
     public func closeWorkspace(workspaceID: String) async throws {
         _ = try await client().request(
             method: "workspace.close",
@@ -501,15 +521,39 @@ public actor HerdrService {
             + "done; IFS=$oldifs; [ -n \"$hb\" ] || hb=herdr"
     }
 
+    /// What the embedded terminal attaches to. Agent panes go through
+    /// `herdr agent attach <pane_id>`; bare shell panes have no agent for that
+    /// path to resolve (`agent.get` returns `agent_not_found`), so they attach
+    /// by terminal id via `herdr terminal attach`.
+    public enum AttachTarget: Sendable, Equatable {
+        case pane(String)
+        case terminal(String)
+
+        var attachArguments: String {
+            switch self {
+            case .pane(let id): return "agent attach '\(id)'"
+            case .terminal(let id): return "terminal attach '\(id)'"
+            }
+        }
+
+        /// Stable identity for view diffing.
+        public var key: String {
+            switch self {
+            case .pane(let id): return "pane:\(id)"
+            case .terminal(let id): return "terminal:\(id)"
+            }
+        }
+    }
+
     /// The command the embedded terminal should spawn to attach to a pane.
     /// `serverVersion` (from the device's last successful ping) lets the attach
     /// pick a herdr binary whose protocol matches the server's — see
     /// `attachBinarySelection`.
-    public nonisolated func attachCommand(paneID: String, serverVersion: String? = nil) -> AttachCommand {
+    public nonisolated func attachCommand(target: AttachTarget, serverVersion: String? = nil) -> AttachCommand {
         // GUI apps launched from Finder don't inherit a login-shell PATH, and
         // sshd exec is not a login shell either — hence the PATH export.
         let script = "\(SSHTunnel.remotePathExport); \(Self.attachBinarySelection(serverVersion: serverVersion)); "
-            + "exec \"$hb\" agent attach '\(paneID)' --takeover"
+            + "exec \"$hb\" \(target.attachArguments) --takeover"
         switch device.kind {
         case .local:
             return AttachCommand(executable: "/bin/sh", args: ["-c", script], environment: [:], authorizationID: nil)
