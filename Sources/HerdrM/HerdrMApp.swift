@@ -179,6 +179,7 @@ struct TerminalSettingsView: View {
     @AppStorage(TerminalDefaults.fontWeightKey) private var fontWeight = TerminalDefaults.defaultFontWeight
     @AppStorage(TerminalDefaults.lineSpacingKey) private var lineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var mouseReporting = true
+    @AppStorage("terminal.copyOnSelect") private var copyOnSelect = true
 
     private let families = TerminalDefaults.monospacedFamilies()
     private let themeNames = TerminalThemeCatalog.availableNames()
@@ -267,6 +268,16 @@ struct TerminalSettingsView: View {
                     }
                 }
 
+                Toggle(isOn: $copyOnSelect) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Copy on select")
+                        Text("Selecting text copies it to the clipboard the moment you release, cmux-style.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 Button("Reset to Defaults") {
                     fontName = ""
                     fontSize = TerminalDefaults.defaultFontSize
@@ -276,6 +287,7 @@ struct TerminalSettingsView: View {
                     lineSpacing = TerminalDefaults.defaultLineSpacing
                     thinStrokes = true
                     mouseReporting = true
+                    copyOnSelect = true
                 }
             }
 

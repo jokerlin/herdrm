@@ -8,6 +8,10 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
+- Copy on select (Settings → Terminal, on by default): releasing a selection
+  — drag, double-click word, or triple-click line — puts it straight on the
+  clipboard, cmux-style, with a transient "copied N chars to clipboard" note
+  in the terminal's corner.
 - Agents menu with ⌘1–⌘9 shortcuts: jump straight to the sidebar's first
   nine agent rows. Numbering follows the visible (status-sorted) order, so a
   key always targets the row shown at that position.
@@ -39,6 +43,12 @@ the Sparkle update description — a release without a section here fails CI.
   (100%–140%). (#4)
 
 ### Fixed
+- Selecting text no longer breaks while the agent is streaming: SwiftTerm
+  clears any active selection on every output chunk (and every newline)
+  whenever mouse reporting is on, and herdr's attach stream emits data
+  near-constantly — so long drags kept collapsing and restarting under the
+  pointer. Output now feeds with that check parked, and selections survive
+  streaming, during the drag and after.
 - Switching agents no longer flashes the terminal blank: the last three
   viewed panes keep their terminal (attach connection and all) mounted behind
   the visible one, so switching back is an instant swap instead of a fresh

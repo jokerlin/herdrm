@@ -130,6 +130,15 @@ final class LineBreakTerminalView: LocalProcessTerminalView {
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
+        // SwiftTerm's feedPrepare() (per chunk) and linefeed() (per newline)
+        // both clear any active selection while mouse reporting is on — and
+        // herdr's attach stream emits data near-constantly, so selections died
+        // mid-drag. Both checks read allowMouseReporting synchronously inside
+        // the feed, so park it for the duration; mouse events run on the same
+        // main thread and can't interleave.
+        let saved = allowMouseReporting
+        allowMouseReporting = false
+        defer { allowMouseReporting = saved }
         guard usesLightColors else {
             super.dataReceived(slice: slice)
             return
@@ -184,6 +193,26 @@ final class LineBreakTerminalView: LocalProcessTerminalView {
         } else {
             super.mouseUp(with: event)
         }
+        copySelectionIfWanted()
+    }
+
+    /// cmux-style copy on select: releasing a drag (or finishing a double/
+    /// triple-click selection) puts the text on the clipboard right away.
+    /// Same extraction as ⌘C. A plain click has no active selection by the
+    /// time this runs, so the clipboard is never clobbered without one.
+    var copyOnSelect = true
+    /// Reports how many characters copy-on-select just put on the clipboard,
+    /// for the transient "copied N chars" feedback.
+    var onCopied: ((Int) -> Void)?
+
+    private func copySelectionIfWanted() {
+        guard copyOnSelect, selection.active else { return }
+        let text = selection.getSelectedText()
+        guard !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        onCopied?(text.count)
     }
 
     // Right-click context menu. SwiftTerm's link lookup is internal, so link
@@ -463,6 +492,8 @@ struct AttachTerminalView: NSViewRepresentable {
     /// When false, mouse drags always select text locally even if the TUI
     /// requested mouse reporting (Shift+drag bypasses it either way).
     var mouseReporting: Bool = true
+    /// Releasing a selection puts it on the clipboard, cmux-style.
+    var copyOnSelect: Bool = true
     /// Non-zero on the visible agent terminal; each bump grabs keyboard focus
     /// once. Once, not continuously — cached hidden terminals stay mounted, so
     /// a continuous grab would fight clicks into companion shells; and 0 (the
@@ -470,6 +501,7 @@ struct AttachTerminalView: NSViewRepresentable {
     var focusEpoch: Int = 0
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
+    var onCopied: (Int) -> Void = { _ in }
     /// Called on the main queue when the attach process exits: the pane was taken
     /// over by another client, the SSH connection dropped, or herdr went away. A
     /// dead session otherwise keeps its last frame and silently eats every
@@ -530,6 +562,7 @@ struct AttachTerminalView: NSViewRepresentable {
         view.handlesRemoteFilePaste = !device.isLocal && acceptsAttachments
         view.onAttachmentError = onAttachmentError
         view.onAttachmentUploadingChanged = onAttachmentUploadingChanged
+        view.onCopied = onCopied
     }
 
     static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
@@ -572,6 +605,9 @@ struct AttachTerminalView: NSViewRepresentable {
             view.font = font
         }
         view.allowMouseReporting = mouseReporting
+        if let view = view as? LineBreakTerminalView {
+            view.copyOnSelect = copyOnSelect
+        }
         // Compared against the inverted value on purpose: thinStrokes on means
         // smoothing off. The setter only stores the flag, so repaint by hand.
         if view.fontSmoothing == thinStrokes {

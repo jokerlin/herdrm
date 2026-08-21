@@ -217,12 +217,16 @@ struct DetailView: View {
     @AppStorage(TerminalDefaults.fontWeightKey) private var terminalFontWeight = TerminalDefaults.defaultFontWeight
     @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
+    @AppStorage("terminal.copyOnSelect") private var terminalCopyOnSelect = true
     @Environment(\.colorScheme) private var colorScheme
     /// Exit codes of ended attaches, keyed by entry id (-1 = unknown). Per entry
     /// because cached background terminals can end while another is on screen.
     @State private var endedAttaches: [String: Int32] = [:]
     @State private var attachRetries: [String: Int] = [:]
     @State private var uploadingAttachment = false
+    /// Transient cmux-style "copied N chars" note in the terminal's corner.
+    @State private var copiedChars: Int?
+    @State private var copyFeedbackGeneration = 0
     /// Recently viewed panes, most recent first. Their terminal trees stay
     /// mounted (attach and all) behind the visible one, so switching back is
     /// instant — no re-attach, no background flashing through. Capped so we
@@ -265,7 +269,10 @@ struct DetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(terminalPaneBackground)
             .overlay(alignment: .bottomTrailing) {
-                if uploadingAttachment { uploadIndicator }
+                VStack(alignment: .trailing, spacing: 6) {
+                    if uploadingAttachment { uploadIndicator }
+                    if let copiedChars { copyFeedbackLabel(copiedChars) }
+                }
             }
             .onAppear { revealPane(entry.ref) }
             .onChange(of: entry.ref) { _, ref in
@@ -372,9 +379,11 @@ struct DetailView: View {
             dark: colorScheme == .dark,
             theme: terminalTheme,
             mouseReporting: terminalMouseReporting,
+            copyOnSelect: terminalCopyOnSelect,
             focusEpoch: isActive ? focusEpoch : 0,
             onAttachmentError: { model.actionError = $0 },
             onAttachmentUploadingChanged: { uploadingAttachment = $0 },
+            onCopied: { showCopyFeedback($0) },
             onExit: { code in
                 if isAgent {
                     endedAttaches[entry.id] = code ?? -1
@@ -411,6 +420,34 @@ struct DetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(terminalPaneBackground.opacity(0.94))
+    }
+
+    /// cmux-style transient note: shows for a moment after copy-on-select,
+    /// then fades. A newer copy restarts the clock instead of being cut short
+    /// by the previous one's dismissal.
+    private func showCopyFeedback(_ chars: Int) {
+        copyFeedbackGeneration += 1
+        let generation = copyFeedbackGeneration
+        withAnimation(.easeOut(duration: 0.12)) { copiedChars = chars }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if copyFeedbackGeneration == generation {
+                withAnimation(.easeOut(duration: 0.4)) { copiedChars = nil }
+            }
+        }
+    }
+
+    /// Bare blue text in the terminal's own font, hugging the bottom-right
+    /// corner — mirrors cmux's copy note.
+    private func copyFeedbackLabel(_ chars: Int) -> some View {
+        Text("copied \(chars) \(chars == 1 ? "char" : "chars") to clipboard")
+            .font(Font(TerminalDefaults.font(
+                name: terminalFontName, size: terminalFontSize, weight: terminalFontWeight
+            )))
+            .foregroundStyle(Theme.working)
+            .padding(.trailing, 18)
+            .padding(.bottom, 12)
+            .transition(.opacity)
     }
 
     private var uploadIndicator: some View {
