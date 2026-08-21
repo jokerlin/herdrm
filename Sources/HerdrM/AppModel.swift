@@ -177,8 +177,13 @@ final class AppModel: ObservableObject {
     }
 
     var selectedEntry: AgentEntry? {
-        guard let selected = selectedPane, let device = device(selected.deviceID) else { return nil }
-        guard let agent = session(selected.deviceID).agents.first(where: { $0.paneID == selected.paneID })
+        selectedPane.flatMap(entry(for:))
+    }
+
+    /// Resolves a pane reference to a live entry; nil once the pane is gone.
+    func entry(for ref: PaneRef) -> AgentEntry? {
+        guard let device = device(ref.deviceID),
+              let agent = session(ref.deviceID).agents.first(where: { $0.paneID == ref.paneID })
         else { return nil }
         return AgentEntry(device: device, agent: agent)
     }

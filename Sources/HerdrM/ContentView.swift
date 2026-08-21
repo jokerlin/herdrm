@@ -218,12 +218,21 @@ struct DetailView: View {
     @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
     @Environment(\.colorScheme) private var colorScheme
-    /// The entry whose attach process exited, and how. Keyed by entry id so a stale
-    /// exit from a previously selected pane never covers a live terminal.
-    @State private var endedAttachKey: String?
-    @State private var endedAttachCode: Int32?
-    @State private var attachRetry = 0
+    /// Exit codes of ended attaches, keyed by entry id (-1 = unknown). Per entry
+    /// because cached background terminals can end while another is on screen.
+    @State private var endedAttaches: [String: Int32] = [:]
+    @State private var attachRetries: [String: Int] = [:]
     @State private var uploadingAttachment = false
+    /// Recently viewed panes, most recent first. Their terminal trees stay
+    /// mounted (attach and all) behind the visible one, so switching back is
+    /// instant — no re-attach, no background flashing through. Capped so we
+    /// don't hold an attach (and, remotely, an ssh connection) per agent.
+    @State private var recentPanes: [PaneRef] = []
+    /// Bumped when the visible pane changes; the active terminal grabs
+    /// keyboard focus once per bump (see AttachTerminalView.focusEpoch).
+    @State private var focusEpoch = 0
+
+    private static let terminalCacheLimit = 3
 
     /// The active theme's background, so the padding around the terminal matches
     /// it instead of framing it in the built-in color.
@@ -237,37 +246,20 @@ struct DetailView: View {
     @ViewBuilder
     private var terminal: some View {
         if let entry = model.selectedEntry {
-            let right = model.companionShells[entry.ref]?.right
-            let down = model.companionShells[entry.ref]?.down
-            // Companion shells share the right column, cmux-style: agent |
-            // right, agent / down, or agent | (right / down). One fixed tree
-            // for every shape — `showSecond` folds unused panes away — so the
-            // agent terminal keeps its identity (no re-attach, no flash) as
-            // splits open and close.
+            // Every recently viewed pane keeps its whole terminal tree mounted;
+            // only the selected one is visible. The selected ref is prepended
+            // eagerly so a fresh selection renders before the LRU state catches
+            // up in onChange (one transient extra tree, trimmed right after).
+            let refs = recentPanes.contains(entry.ref)
+                ? recentPanes
+                : [entry.ref] + recentPanes
             ZStack {
-                DraggableSplit(axis: .horizontal, showSecond: right != nil) {
-                    DraggableSplit(axis: .vertical, showSecond: right == nil && down != nil) {
-                        attachView(entry, target: .pane(entry.agent.paneID))
-                    } second: {
-                        if let down {
-                            attachView(entry, target: .terminal(down.terminalID))
-                        }
+                ForEach(refs, id: \.self) { ref in
+                    if let cached = model.entry(for: ref) {
+                        terminalTree(cached, isActive: ref == entry.ref)
+                            .opacity(ref == entry.ref ? 1 : 0)
+                            .allowsHitTesting(ref == entry.ref)
                     }
-                } second: {
-                    DraggableSplit(axis: .vertical, showSecond: down != nil) {
-                        if let right {
-                            attachView(entry, target: .terminal(right.terminalID))
-                        }
-                    } second: {
-                        if let down {
-                            attachView(entry, target: .terminal(down.terminalID))
-                        }
-                    }
-                }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                if endedAttachKey == entry.id {
-                    attachEndedOverlay(entry)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -275,8 +267,9 @@ struct DetailView: View {
             .overlay(alignment: .bottomTrailing) {
                 if uploadingAttachment { uploadIndicator }
             }
-            .onChange(of: entry.id) { _, _ in
-                endedAttachKey = nil
+            .onAppear { revealPane(entry.ref) }
+            .onChange(of: entry.ref) { _, ref in
+                revealPane(ref)
                 uploadingAttachment = false
             }
         } else {
@@ -304,9 +297,64 @@ struct DetailView: View {
         }
     }
 
+    /// One agent's full terminal layout. Companion shells share the right
+    /// column, cmux-style: agent | right, agent / down, or agent | (right /
+    /// down). One fixed tree for every shape — `showSecond` folds unused panes
+    /// away — so the agent terminal keeps its identity (no re-attach, no
+    /// flash) as splits open and close.
+    private func terminalTree(_ entry: AppModel.AgentEntry, isActive: Bool) -> some View {
+        let right = model.companionShells[entry.ref]?.right
+        let down = model.companionShells[entry.ref]?.down
+        return ZStack {
+            DraggableSplit(axis: .horizontal, showSecond: right != nil) {
+                DraggableSplit(axis: .vertical, showSecond: right == nil && down != nil) {
+                    attachView(entry, target: .pane(entry.agent.paneID), isActive: isActive)
+                } second: {
+                    if let down {
+                        attachView(entry, target: .terminal(down.terminalID))
+                    }
+                }
+            } second: {
+                DraggableSplit(axis: .vertical, showSecond: down != nil) {
+                    if let right {
+                        attachView(entry, target: .terminal(right.terminalID))
+                    }
+                } second: {
+                    if let down {
+                        attachView(entry, target: .terminal(down.terminalID))
+                    }
+                }
+            }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            if let code = endedAttaches[entry.id] {
+                attachEndedOverlay(entry, code: code)
+            }
+        }
+    }
+
+    /// Moves the pane to the LRU front, drops dead refs, and hands keyboard
+    /// focus to its terminal. An attach that ended while the pane was hidden
+    /// (another client took it over) reconnects here instead of greeting the
+    /// switch with the session-ended overlay.
+    private func revealPane(_ ref: PaneRef) {
+        var refs = recentPanes.filter { $0 != ref && model.entry(for: $0) != nil }
+        refs.insert(ref, at: 0)
+        recentPanes = Array(refs.prefix(Self.terminalCacheLimit))
+        focusEpoch += 1
+        let cachedIDs = Set(recentPanes.compactMap { model.entry(for: $0)?.id })
+        attachRetries = attachRetries.filter { cachedIDs.contains($0.key) }
+        if let entryID = model.entry(for: ref)?.id, endedAttaches[entryID] != nil {
+            endedAttaches[entryID] = nil
+            attachRetries[entryID, default: 0] += 1
+        }
+        endedAttaches = endedAttaches.filter { cachedIDs.contains($0.key) }
+    }
+
     private func attachView(
         _ entry: AppModel.AgentEntry,
-        target: HerdrService.AttachTarget
+        target: HerdrService.AttachTarget,
+        isActive: Bool = false
     ) -> some View {
         // Only the agent pane gets the session-ended overlay; a helper shell
         // exiting just folds its split away.
@@ -324,24 +372,24 @@ struct DetailView: View {
             dark: colorScheme == .dark,
             theme: terminalTheme,
             mouseReporting: terminalMouseReporting,
+            focusEpoch: isActive ? focusEpoch : 0,
             onAttachmentError: { model.actionError = $0 },
             onAttachmentUploadingChanged: { uploadingAttachment = $0 },
             onExit: { code in
                 if isAgent {
-                    endedAttachKey = entry.id
-                    endedAttachCode = code
+                    endedAttaches[entry.id] = code ?? -1
                 } else {
                     model.companionShellExited(ref: entry.ref, target: target)
                 }
             }
         )
-        .id("attach-\(entry.id)-\(target.key)-\(colorScheme)-\(terminalTheme)-\(attachRetry)")
+        .id("attach-\(entry.id)-\(target.key)-\(colorScheme)-\(terminalTheme)-\(attachRetries[entry.id] ?? 0)")
     }
 
     /// ssh exits 255 for transport failures; everything else is the far end closing
     /// (takeover by another client, the pane going away, herdr stopping).
-    private func attachEndedOverlay(_ entry: AppModel.AgentEntry) -> some View {
-        let dropped = endedAttachCode == 255
+    private func attachEndedOverlay(_ entry: AppModel.AgentEntry, code: Int32) -> some View {
+        let dropped = code == 255
         return VStack(spacing: 10) {
             Image(systemName: dropped ? "bolt.horizontal.circle" : "rectangle.slash")
                 .font(.system(size: 28, weight: .light))
@@ -355,8 +403,8 @@ struct DetailView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.textTertiary)
             Button("Reconnect") {
-                endedAttachKey = nil
-                attachRetry += 1
+                endedAttaches[entry.id] = nil
+                attachRetries[entry.id, default: 0] += 1
             }
             .controlSize(.small)
             .keyboardShortcut(.defaultAction)

@@ -8,6 +8,9 @@ the Sparkle update description — a release without a section here fails CI.
 ## [Unreleased]
 
 ### Added
+- Agents menu with ⌘1–⌘9 shortcuts: jump straight to the sidebar's first
+  nine agent rows. Numbering follows the visible (status-sorted) order, so a
+  key always targets the row shown at that position.
 - Terminal color themes: Settings → Terminal gains a Theme picker with the
   full ghostty theme catalog (463 themes, bundled; themes in
   `~/.config/ghostty/themes` are offered too and win by name). A theme applies
@@ -36,6 +39,18 @@ the Sparkle update description — a release without a section here fails CI.
   (100%–140%). (#4)
 
 ### Fixed
+- Switching agents no longer flashes the terminal blank: the last three
+  viewed panes keep their terminal (attach connection and all) mounted behind
+  the visible one, so switching back is an instant swap instead of a fresh
+  attach — remote agents skip the SSH handshake wait too. Keyboard focus
+  follows the visible terminal, and a pane taken over by another client while
+  hidden reconnects automatically when revealed.
+- Torn-down terminals no longer leave zombie processes: SwiftTerm's
+  `terminate()` SIGTERMs the attach ssh but never reaps it (its exit watcher
+  is already gone by then), so closing a split, switching agents, or
+  reconnecting each parked one `<defunct>` entry under herdrm until quit.
+  The teardown now reaps the child itself, with a kqueue exit watch for the
+  rare slow exit.
 - File-menu shortcuts (⌘N, ⇧⌘N, and the new ⌘D/⇧⌘D) no longer play dead on a
   freshly launched app. Menu state came through SwiftUI's `@FocusedValue`,
   but a focused scene is never established while the first responder is an

@@ -463,6 +463,11 @@ struct AttachTerminalView: NSViewRepresentable {
     /// When false, mouse drags always select text locally even if the TUI
     /// requested mouse reporting (Shift+drag bypasses it either way).
     var mouseReporting: Bool = true
+    /// Non-zero on the visible agent terminal; each bump grabs keyboard focus
+    /// once. Once, not continuously — cached hidden terminals stay mounted, so
+    /// a continuous grab would fight clicks into companion shells; and 0 (the
+    /// companions' value) never grabs.
+    var focusEpoch: Int = 0
     var onAttachmentError: (String) -> Void = { _ in }
     var onAttachmentUploadingChanged: (Bool) -> Void = { _ in }
     /// Called on the main queue when the attach process exits: the pane was taken
@@ -505,6 +510,16 @@ struct AttachTerminalView: NSViewRepresentable {
         }
         context.coordinator.onExit = onExit
         configureAppearance(nsView)
+        if focusEpoch != 0, context.coordinator.focusedEpoch != focusEpoch {
+            context.coordinator.focusedEpoch = focusEpoch
+            // Async: makeFirstResponder mid-update would mutate view state
+            // while SwiftUI is still committing this render pass.
+            DispatchQueue.main.async { [weak nsView] in
+                guard let nsView, let window = nsView.window,
+                      window.firstResponder !== nsView else { return }
+                window.makeFirstResponder(nsView)
+            }
+        }
     }
 
     /// Re-applied on update: herdr reports the agent kind as nil until detection
@@ -520,7 +535,34 @@ struct AttachTerminalView: NSViewRepresentable {
     static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
         // A view being torn down must not report its own terminate() as an exit.
         coordinator.onExit = nil
+        let pid = nsView.process.shellPid
         nsView.terminate()
+        // SwiftTerm's terminate() SIGTERMs the child but never reaps it — and
+        // its exit watcher is already gone by then — so every torn-down
+        // terminal (split closed, agent switched, reconnect) left a zombie.
+        if pid > 0 {
+            reap(pid)
+        }
+    }
+
+    private static func reap(_ pid: pid_t) {
+        var status: Int32 = 0
+        // ssh usually dies within the SIGTERM-to-here window.
+        if waitpid(pid, &status, WNOHANG) == pid { return }
+        let source = DispatchSource.makeProcessSource(
+            identifier: pid, eventMask: .exit, queue: .global(qos: .utility)
+        )
+        source.setEventHandler {
+            var status: Int32 = 0
+            waitpid(pid, &status, WNOHANG)
+            source.cancel()
+        }
+        source.resume()
+        // kqueue never fires for a process that exited before the source was
+        // armed; a second WNOHANG closes that gap.
+        if waitpid(pid, &status, WNOHANG) == pid {
+            source.cancel()
+        }
     }
 
     @MainActor
@@ -579,6 +621,7 @@ struct AttachTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         var authorizationID: UUID?
         var onExit: ((Int32?) -> Void)?
+        var focusedEpoch = 0
 
         deinit {
             discardAuthorization()
