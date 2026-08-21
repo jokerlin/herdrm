@@ -48,7 +48,6 @@ struct RootView: View {
                 .keyboardShortcut("k", modifiers: .command)
                 .hidden()
         )
-        .focusedSceneValue(\.appModel, model)
         .sheet(isPresented: $model.showSearch) { SearchSheet(model: model) }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 980, minHeight: 620)

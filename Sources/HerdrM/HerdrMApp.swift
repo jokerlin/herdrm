@@ -25,14 +25,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private struct AppModelFocusedValueKey: FocusedValueKey {
-    typealias Value = AppModel
-}
+/// File-menu commands. Talks to the app's single model directly: menu state
+/// used to come through `@FocusedValue`, but SwiftUI never establishes a
+/// focused scene while the first responder is an AppKit view (the SwiftTerm
+/// terminal), so on a fresh launch the items stayed disabled and ⌘D went
+/// nowhere. An `@ObservedObject` wrapper keeps the disabled states fresh.
+private struct FileCommands: View {
+    @ObservedObject var model: AppModel
 
-extension FocusedValues {
-    var appModel: AppModel? {
-        get { self[AppModelFocusedValueKey.self] }
-        set { self[AppModelFocusedValueKey.self] = newValue }
+    var body: some View {
+        Button("New Agent") { model.showNewAgent = true }
+            .keyboardShortcut("n", modifiers: .command)
+        Button("New Space") { model.showNewSpace = true }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+        Divider()
+        // cmux-style helper shells beside the agent; pressing again closes them.
+        Button("Split Terminal Right") { model.toggleCompanionShell(.right) }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(model.selectedEntry == nil)
+        Button("Split Terminal Down") { model.toggleCompanionShell(.down) }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(model.selectedEntry == nil)
     }
 }
 
@@ -40,7 +53,6 @@ extension FocusedValues {
 struct HerdrMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("app.theme") private var themePreference = "system"
-    @FocusedValue(\.appModel) private var focusedModel
 
     private let updaterController: SPUStandardUpdaterController
 
@@ -71,20 +83,7 @@ struct HerdrMApp: App {
             // herdrm is a single-window console: a second window would duplicate the
             // whole device tree, so New Window gives up ⌘N to the action that matters.
             CommandGroup(replacing: .newItem) {
-                Button("New Agent") { focusedModel?.showNewAgent = true }
-                    .keyboardShortcut("n", modifiers: .command)
-                    .disabled(focusedModel == nil)
-                Button("New Space") { focusedModel?.showNewSpace = true }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(focusedModel == nil)
-                Divider()
-                // cmux-style helper shells beside the agent; pressing again closes them.
-                Button("Split Terminal Right") { focusedModel?.toggleCompanionShell(.right) }
-                    .keyboardShortcut("d", modifiers: .command)
-                    .disabled(focusedModel?.selectedEntry == nil)
-                Button("Split Terminal Down") { focusedModel?.toggleCompanionShell(.down) }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-                    .disabled(focusedModel?.selectedEntry == nil)
+                FileCommands(model: appDelegate.model)
             }
 
             CommandGroup(after: .appInfo) {

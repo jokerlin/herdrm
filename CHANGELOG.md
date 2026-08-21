@@ -30,6 +30,12 @@ the Sparkle update description — a release without a section here fails CI.
   agent for the agent-attach path.
 
 ### Fixed
+- File-menu shortcuts (⌘N, ⇧⌘N, and the new ⌘D/⇧⌘D) no longer play dead on a
+  freshly launched app. Menu state came through SwiftUI's `@FocusedValue`,
+  but a focused scene is never established while the first responder is an
+  AppKit view — herdrm's terminal always is — so the items stayed disabled
+  until window focus happened to bounce. The menu now talks to the app's
+  single model directly.
 - Removed the gray track down the terminal's right edge: SwiftTerm pins a
   permanently disabled `NSScroller` there, useless for herdr's
   alternate-screen TUI, and its disabled state painted a visible strip on
