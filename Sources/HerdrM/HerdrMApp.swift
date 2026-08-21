@@ -49,6 +49,24 @@ private struct FileCommands: View {
     }
 }
 
+/// Agents menu: ⌘1–⌘9 jump to the sidebar's first nine agent rows. Numbering
+/// follows the visible (status-sorted) order, so a key always targets the row
+/// the sidebar shows at that position when it's pressed.
+private struct AgentCommands: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        if model.visibleAgents.isEmpty {
+            Button("No Agents") {}
+                .disabled(true)
+        }
+        ForEach(Array(model.visibleAgents.prefix(9).enumerated()), id: \.element.id) { index, entry in
+            Button(entry.agent.title) { model.selectedPane = entry.ref }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+        }
+    }
+}
+
 @main
 struct HerdrMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -90,6 +108,10 @@ struct HerdrMApp: App {
                 Button("Check for Updates…") {
                     updaterController.checkForUpdates(nil)
                 }
+            }
+
+            CommandMenu("Agents") {
+                AgentCommands(model: appDelegate.model)
             }
         }
 
