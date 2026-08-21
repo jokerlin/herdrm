@@ -13,7 +13,7 @@ run: build
 # The version is pinned above the official Sparkle feed so the updater
 # doesn't "upgrade" the local build away; deleting in /Applications is
 # often permission-denied, so the old copy moves to the Trash instead.
-INSTALL_VERSION ?= 0.3.7
+INSTALL_VERSION ?= 0.3.8
 install: gen
 	xcodebuild -project HerdrM.xcodeproj -scheme HerdrM -configuration Release -derivedDataPath build build -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO MARKETING_VERSION=$(INSTALL_VERSION) CURRENT_PROJECT_VERSION=999 | tail -5
 	osascript -e 'tell application "herdrm" to quit' 2>/dev/null || true
