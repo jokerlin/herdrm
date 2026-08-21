@@ -5,12 +5,18 @@ import SwiftUI
 /// panes from their intrinsic preferences on first layout — with terminals
 /// (no intrinsic size) the second pane collapsed to its minimum — so this
 /// lays the panes out from an explicit ratio instead, with a draggable
-/// background-colored divider. The ratio resets whenever the view is
-/// recreated (a companion shell toggling does that at the call site).
+/// background-colored divider.
+///
+/// `showSecond` collapses the split to just the first pane *without changing
+/// the view tree's structure*: the first pane keeps its identity (and its
+/// live terminal NSView) as splits open and close. Swapping whole layout
+/// shapes instead used to rebuild the agent terminal — a full re-attach and
+/// a white flash — on every ⌘D.
 struct DraggableSplit<First: View, Second: View>: View {
     enum Axis { case horizontal, vertical }
 
     let axis: Axis
+    let showSecond: Bool
     @ViewBuilder let first: () -> First
     @ViewBuilder let second: () -> Second
 
@@ -22,19 +28,24 @@ struct DraggableSplit<First: View, Second: View>: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let total = max(0, (axis == .horizontal ? proxy.size.width : proxy.size.height) - Self.dividerThickness)
-            let firstLength = (total * ratio).rounded()
+            let full = axis == .horizontal ? proxy.size.width : proxy.size.height
+            let total = max(0, full - Self.dividerThickness)
+            let firstLength = showSecond ? (total * ratio).rounded() : full
             if axis == .horizontal {
                 HStack(spacing: 0) {
                     first().frame(width: firstLength)
-                    divider(total: total)
-                    second().frame(width: total - firstLength)
+                    if showSecond {
+                        divider(total: total)
+                        second().frame(width: total - firstLength)
+                    }
                 }
             } else {
                 VStack(spacing: 0) {
                     first().frame(height: firstLength)
-                    divider(total: total)
-                    second().frame(height: total - firstLength)
+                    if showSecond {
+                        divider(total: total)
+                        second().frame(height: total - firstLength)
+                    }
                 }
             }
         }

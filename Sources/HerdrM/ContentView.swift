@@ -228,35 +228,30 @@ struct DetailView: View {
     @ViewBuilder
     private var terminal: some View {
         if let entry = model.selectedEntry {
-            let companion = model.companionShells[entry.ref]
-            Group {
-                // Companion shells share the right column, cmux-style:
-                // agent | right, agent / down, or agent | (right / down).
-                switch (companion?.right, companion?.down) {
-                case let (right?, down?):
-                    DraggableSplit(axis: .horizontal) {
-                        attachView(entry, target: .pane(entry.agent.paneID))
-                    } second: {
-                        DraggableSplit(axis: .vertical) {
-                            attachView(entry, target: .terminal(right.terminalID))
-                        } second: {
-                            attachView(entry, target: .terminal(down.terminalID))
-                        }
-                    }
-                case let (right?, nil):
-                    DraggableSplit(axis: .horizontal) {
-                        attachView(entry, target: .pane(entry.agent.paneID))
-                    } second: {
-                        attachView(entry, target: .terminal(right.terminalID))
-                    }
-                case let (nil, down?):
-                    DraggableSplit(axis: .vertical) {
-                        attachView(entry, target: .pane(entry.agent.paneID))
-                    } second: {
+            let right = model.companionShells[entry.ref]?.right
+            let down = model.companionShells[entry.ref]?.down
+            // Companion shells share the right column, cmux-style: agent |
+            // right, agent / down, or agent | (right / down). One fixed tree
+            // for every shape — `showSecond` folds unused panes away — so the
+            // agent terminal keeps its identity (no re-attach, no flash) as
+            // splits open and close.
+            DraggableSplit(axis: .horizontal, showSecond: right != nil) {
+                DraggableSplit(axis: .vertical, showSecond: right == nil && down != nil) {
+                    attachView(entry, target: .pane(entry.agent.paneID))
+                } second: {
+                    if let down {
                         attachView(entry, target: .terminal(down.terminalID))
                     }
-                case (nil, nil):
-                    attachView(entry, target: .pane(entry.agent.paneID))
+                }
+            } second: {
+                DraggableSplit(axis: .vertical, showSecond: down != nil) {
+                    if let right {
+                        attachView(entry, target: .terminal(right.terminalID))
+                    }
+                } second: {
+                    if let down {
+                        attachView(entry, target: .terminal(down.terminalID))
+                    }
                 }
             }
                 .padding(.horizontal, 10)
