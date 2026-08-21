@@ -51,6 +51,25 @@ public actor SSHTunnel {
     public static let remotePathExport =
         "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\""
 
+    /// Ties a spawned command's life to the app's: run as `/bin/sh -c <script> <cmd> <args…>`
+    /// with stdin set to a pipe the app holds. A watcher subshell blocks on that pipe and
+    /// kills the command when the write end vanishes — which is exactly when the app died
+    /// without running `tearDown` (crash, force quit), the case `deinit`/terminate hooks
+    /// can't cover. The main shell `exec`s the command, so its pid, exit status, and
+    /// signals stay the command's own. The `ps` check guards the rare late EOF (the app
+    /// released the pipe long after the command already exited) from signalling a
+    /// recycled pid.
+    /// The watcher's redirections wrap the whole job: it must hold nothing of the
+    /// command's stdio (a kept stderr write end would stall the failure path's
+    /// read-to-EOF), only the fd-4 copy of the app's pipe.
+    static let processDeathPactScript = """
+        exec 4<&0 0</dev/null
+        { cat >/dev/null
+          case "$(ps -o comm= -p $$ 2>/dev/null)" in *"${0##*/}"*) kill $$;; esac
+        } 0<&4 4<&- >/dev/null 2>&1 &
+        exec 4<&- "$0" "$@"
+        """
+
     public init(target: String, credentialID: UUID? = nil) {
         self.target = target
         self.credentialID = credentialID
@@ -104,10 +123,13 @@ public actor SSHTunnel {
         try? FileManager.default.removeItem(atPath: localSock)
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
         let authentication = Self.authenticationConfiguration(for: credentialID)
         defer { authentication.discardAuthorization() }
-        proc.arguments = ["-N"] + authentication.arguments + [
+        // The pipe's write end lives with this Process object; if the app dies without
+        // tearing the tunnel down, it closes and the death-pact wrapper reaps the ssh.
+        proc.standardInput = Pipe()
+        proc.arguments = ["-c", Self.processDeathPactScript, "/usr/bin/ssh", "-N"] + authentication.arguments + [
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=10",
             "-o", "ExitOnForwardFailure=yes",

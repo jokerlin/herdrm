@@ -573,7 +573,9 @@ public actor HerdrService {
     public nonisolated func attachCommand(target: AttachTarget, serverVersion: String? = nil) -> AttachCommand {
         // GUI apps launched from Finder don't inherit a login-shell PATH, and
         // sshd exec is not a login shell either — hence the PATH export.
-        let script = "\(SSHTunnel.remotePathExport); \(Self.attachBinarySelection(serverVersion: serverVersion)); "
+        // The leading `: herdrm-attach` is a no-op marker that survives into the local
+        // process argv, so OrphanSweep can recognize leftover attach processes.
+        let script = ": herdrm-attach; \(SSHTunnel.remotePathExport); \(Self.attachBinarySelection(serverVersion: serverVersion)); "
             + "exec \"$hb\" \(target.attachArguments) --takeover"
         switch device.kind {
         case .local:
