@@ -155,10 +155,11 @@ public struct SocketRPC: Sendable {
         }
         var chunk = [UInt8](repeating: 0, count: 65536)
         while true {
-            if let timeoutSeconds {
-                var tv = timeval(tv_sec: Int(timeoutSeconds), tv_usec: 0)
-                _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-            }
+            // SO_RCVTIMEO sticks to the fd, so nil must actively clear it (0 = block
+            // forever) — the event stream reads its subscribe ack with a timeout and
+            // then streams untimed on the same fd.
+            var tv = timeval(tv_sec: timeoutSeconds.map(Int.init) ?? 0, tv_usec: 0)
+            _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
             let count = read(fd, &chunk, chunk.count)
             if count == 0 { return buffer.isEmpty ? nil : buffer }
             if count < 0 {
