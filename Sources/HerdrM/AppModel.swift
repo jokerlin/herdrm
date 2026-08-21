@@ -23,6 +23,9 @@ struct SpaceRef: Hashable {
 /// Live state for one device's herdr session.
 struct DeviceSessionState {
     var connection: ConnectionState = .idle
+    /// Version from the last successful ping; lets a refresh that succeeds after
+    /// a transient failure restore `.connected` without re-pinging.
+    var serverVersion: String?
     var agents: [AgentInfo] = []
     var workspaces: [WorkspaceInfo] = []
     var panes: [PaneInfo] = []
@@ -234,6 +237,9 @@ final class AppModel: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        // Reap ssh helpers a crashed/killed previous instance left behind before
+        // spawning our own.
+        Task.detached(priority: .utility) { OrphanSweep.sweep() }
         NotificationManager.shared.setup(model: self)
         for device in devices {
             startSession(device)
@@ -262,6 +268,7 @@ final class AppModel: ObservableObject {
                 do {
                     let pong = try await service.connect()
                     self.sessions[device.id]?.connection = .connected(version: pong.version)
+                    self.sessions[device.id]?.serverVersion = pong.version
                     backoff = 1
                     // retried on every successful connect until it sticks (a fresh
                     // device's first probes can fail before its host key is known)
@@ -403,6 +410,12 @@ final class AppModel: ObservableObject {
         guard let device = device(deviceID), let service = services[deviceID] else { return }
         do {
             let snapshot = try await service.snapshot()
+            // A transient snapshot failure marked the device failed below; the next
+            // success proves the connection is fine again, so lift the red state.
+            if case .failed = sessions[deviceID]?.connection ?? .idle {
+                sessions[deviceID]?.connection =
+                    .connected(version: sessions[deviceID]?.serverVersion ?? "")
+            }
             notifyTransitions(
                 device: device,
                 from: previousStatuses[deviceID] ?? [:],
