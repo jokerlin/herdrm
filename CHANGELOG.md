@@ -29,6 +29,12 @@ the Sparkle update description — a release without a section here fails CI.
   layout; bare panes attach via `herdr terminal attach` since they have no
   agent for the agent-attach path.
 
+- Terminal legibility settings: **Thin strokes** (on by default) turns off the
+  macOS font smoothing that thickens glyph stems and makes agent output —
+  Claude Code's bold text especially — look heavy and smudged; **Weight**
+  (Light/Regular/Medium) for the system monospaced font; and **Line spacing**
+  (100%–140%). (#4)
+
 ### Fixed
 - File-menu shortcuts (⌘N, ⇧⌘N, and the new ⌘D/⇧⌘D) no longer play dead on a
   freshly launched app. Menu state came through SwiftUI's `@FocusedValue`,
@@ -40,6 +46,29 @@ the Sparkle update description — a release without a section here fails CI.
   permanently disabled `NSScroller` there, useless for herdr's
   alternate-screen TUI, and its disabled state painted a visible strip on
   themed backgrounds.
+
+## [0.3.7] - 2026-08-20
+
+### Added
+- Intel Macs are supported: releases are now universal binaries (arm64 +
+  x86_64) and the Homebrew cask no longer requires Apple Silicon. (#12, #26,
+  thanks @Yuxin-Qiao!)
+- Paste files and images straight into a Claude Code or Copilot pane. On a
+  remote device the file is streamed over SSH into a private cache under
+  `~/.cache/herdrm/attachments` (0700, entries dropped after seven days) and
+  its remote path is pasted into the agent; on a local device the paste is
+  forwarded as Ctrl+V so the agent reads the clipboard itself. Uploads are
+  capped at 50 MB and show an indicator while they run. (#25, thanks
+  @ljxw88!)
+
+### Fixed
+- A dead terminal session no longer freezes on its last frame while eating
+  input: a dropped SSH connection or a takeover by another client now covers
+  the pane with an explanation and a Reconnect button, and the attach SSH
+  carries the same keepalives as the tunnel so dead paths are noticed within
+  ~45 s. (#23, thanks @lcandy2!)
+- Settings → Terminal: the preview no longer sits indented by the form's label
+  column, and the mouse-reporting description no longer truncates.
 
 ## [0.3.6] - 2026-08-20
 

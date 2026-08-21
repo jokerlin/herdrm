@@ -625,6 +625,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A helper shell's attach exited (the shell was `exit`ed, or its pane
+    /// died): fold its split away right now instead of waiting for the next
+    /// snapshot refresh to notice the pane is gone.
+    func companionShellExited(ref: PaneRef, target: HerdrService.AttachTarget) {
+        guard var set = companionShells[ref] else { return }
+        if let right = set.right, HerdrService.AttachTarget.terminal(right.terminalID).key == target.key {
+            set.right = nil
+        }
+        if let down = set.down, HerdrService.AttachTarget.terminal(down.terminalID).key == target.key {
+            set.down = nil
+        }
+        companionShells[ref] = set.isEmpty ? nil : set
+    }
+
     /// New Agent: a fresh tab in the space plus agent.start. Agent names are
     /// session-global in herdr, so collisions retry with a unique suffix.
     /// `bypass` appends the kind's skip-permissions flag when one is known.

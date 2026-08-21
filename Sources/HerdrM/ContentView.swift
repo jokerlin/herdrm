@@ -213,8 +213,17 @@ struct DetailView: View {
     @AppStorage(TerminalDefaults.fontNameKey) private var terminalFontName = ""
     @AppStorage(TerminalDefaults.fontSizeKey) private var terminalFontSize = TerminalDefaults.defaultFontSize
     @AppStorage(TerminalDefaults.themeKey) private var terminalTheme = ""
+    @AppStorage(TerminalDefaults.thinStrokesKey) private var terminalThinStrokes = true
+    @AppStorage(TerminalDefaults.fontWeightKey) private var terminalFontWeight = TerminalDefaults.defaultFontWeight
+    @AppStorage(TerminalDefaults.lineSpacingKey) private var terminalLineSpacing = TerminalDefaults.defaultLineSpacing
     @AppStorage("terminal.mouseReporting") private var terminalMouseReporting = true
     @Environment(\.colorScheme) private var colorScheme
+    /// The entry whose attach process exited, and how. Keyed by entry id so a stale
+    /// exit from a previously selected pane never covers a live terminal.
+    @State private var endedAttachKey: String?
+    @State private var endedAttachCode: Int32?
+    @State private var attachRetry = 0
+    @State private var uploadingAttachment = false
 
     /// The active theme's background, so the padding around the terminal matches
     /// it instead of framing it in the built-in color.
@@ -235,29 +244,41 @@ struct DetailView: View {
             // for every shape — `showSecond` folds unused panes away — so the
             // agent terminal keeps its identity (no re-attach, no flash) as
             // splits open and close.
-            DraggableSplit(axis: .horizontal, showSecond: right != nil) {
-                DraggableSplit(axis: .vertical, showSecond: right == nil && down != nil) {
-                    attachView(entry, target: .pane(entry.agent.paneID))
+            ZStack {
+                DraggableSplit(axis: .horizontal, showSecond: right != nil) {
+                    DraggableSplit(axis: .vertical, showSecond: right == nil && down != nil) {
+                        attachView(entry, target: .pane(entry.agent.paneID))
+                    } second: {
+                        if let down {
+                            attachView(entry, target: .terminal(down.terminalID))
+                        }
+                    }
                 } second: {
-                    if let down {
-                        attachView(entry, target: .terminal(down.terminalID))
+                    DraggableSplit(axis: .vertical, showSecond: down != nil) {
+                        if let right {
+                            attachView(entry, target: .terminal(right.terminalID))
+                        }
+                    } second: {
+                        if let down {
+                            attachView(entry, target: .terminal(down.terminalID))
+                        }
                     }
                 }
-            } second: {
-                DraggableSplit(axis: .vertical, showSecond: down != nil) {
-                    if let right {
-                        attachView(entry, target: .terminal(right.terminalID))
-                    }
-                } second: {
-                    if let down {
-                        attachView(entry, target: .terminal(down.terminalID))
-                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                if endedAttachKey == entry.id {
+                    attachEndedOverlay(entry)
                 }
             }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(terminalPaneBackground)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(terminalPaneBackground)
+            .overlay(alignment: .bottomTrailing) {
+                if uploadingAttachment { uploadIndicator }
+            }
+            .onChange(of: entry.id) { _, _ in
+                endedAttachKey = nil
+                uploadingAttachment = false
+            }
         } else {
             VStack(spacing: 10) {
                 Image(systemName: "terminal")
@@ -287,17 +308,75 @@ struct DetailView: View {
         _ entry: AppModel.AgentEntry,
         target: HerdrService.AttachTarget
     ) -> some View {
-        AttachTerminalView(
+        // Only the agent pane gets the session-ended overlay; a helper shell
+        // exiting just folds its split away.
+        let isAgent = target.key == HerdrService.AttachTarget.pane(entry.agent.paneID).key
+        return AttachTerminalView(
             device: entry.device,
             target: target,
             serverVersion: model.serverVersion(deviceID: entry.device.id),
+            agentKind: isAgent ? entry.agent.agentKindRaw : nil,
             fontName: terminalFontName,
             fontSize: terminalFontSize,
+            thinStrokes: terminalThinStrokes,
+            fontWeight: terminalFontWeight,
+            lineSpacing: terminalLineSpacing,
             dark: colorScheme == .dark,
             theme: terminalTheme,
-            mouseReporting: terminalMouseReporting
+            mouseReporting: terminalMouseReporting,
+            onAttachmentError: { model.actionError = $0 },
+            onAttachmentUploadingChanged: { uploadingAttachment = $0 },
+            onExit: { code in
+                if isAgent {
+                    endedAttachKey = entry.id
+                    endedAttachCode = code
+                } else {
+                    model.companionShellExited(ref: entry.ref, target: target)
+                }
+            }
         )
-        .id("attach-\(entry.id)-\(target.key)-\(colorScheme)-\(terminalTheme)")
+        .id("attach-\(entry.id)-\(target.key)-\(colorScheme)-\(terminalTheme)-\(attachRetry)")
+    }
+
+    /// ssh exits 255 for transport failures; everything else is the far end closing
+    /// (takeover by another client, the pane going away, herdr stopping).
+    private func attachEndedOverlay(_ entry: AppModel.AgentEntry) -> some View {
+        let dropped = endedAttachCode == 255
+        return VStack(spacing: 10) {
+            Image(systemName: dropped ? "bolt.horizontal.circle" : "rectangle.slash")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.textGhost)
+            Text(dropped ? "Connection to \(entry.device.name) dropped" : "Terminal session ended")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.text)
+            Text(dropped
+                ? "The SSH connection behind this terminal went away."
+                : "Another client took this pane over, or the attach closed.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textTertiary)
+            Button("Reconnect") {
+                endedAttachKey = nil
+                attachRetry += 1
+            }
+            .controlSize(.small)
+            .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(terminalPaneBackground.opacity(0.94))
+    }
+
+    private var uploadIndicator: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text("Uploading…")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: Capsule())
+        .padding(.trailing, 20)
+        .padding(.bottom, 18)
     }
 
     private var showsStartAgentShortcut: Bool {
